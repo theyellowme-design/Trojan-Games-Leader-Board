@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trojan Games Champion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+        }
+        .leaderboard-item {
+            transition: background-color 0.3s ease, transform 0.3s ease;
+        }
+        .leaderboard-item:hover {
+            transform: scale(1.02);
+            background-color: #f8fafc;
+        }
+        .leaderboard-item.animating {
+            transition: transform 0.6s cubic-bezier(0.65, 0, 0.35, 1);
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .new-item-animation {
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+        .message-box {
+            transition: opacity 0.5s ease-in-out;
+        }
+        #confetti-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+        }
+        .modal-overlay {
+            transition: opacity 0.3s ease;
+        }
+        /* Balloon Styles */
+        #balloon-container {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 9998;
+            overflow: hidden;
+        }
+        .balloon {
+            position: absolute;
+            bottom: -150px;
+            width: 60px;
+            height: 75px;
+            background-color: rgba(239, 68, 68, 0.8);
+            border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+            animation: floatUp 4s ease-in forwards;
+            backdrop-filter: blur(2px);
+        }
+        .balloon::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 8px;
+            background: inherit;
+            border-radius: 50%;
+        }
+        @keyframes floatUp {
+            to {
+                transform: translateY(-120vh);
+                opacity: 0;
+            }
+        }
+        details > summary {
+            list-style: none;
+        }
+        details > summary::-webkit-details-marker {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <canvas id="confetti-canvas"></canvas>
+    <div id="balloon-container"></div>
+ 
+    <!-- Reset Confirmation Modal -->
+    <div id="reset-modal" class="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden z-50">
+        <div class="bg-white rounded-2xl shadow-lg p-6 w-full max-w-sm text-center">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">Reset Leaderboard?</h3>
+            <p class="text-gray-600 mb-6">This will set all team scores back to zero. This action cannot be undone.</p>
+            <div class="flex justify-center gap-4">
+                <button id="cancel-reset-btn" class="px-6 py-2 bg-gray-200 text-gray-800 font-semibold rounded-lg hover:bg-gray-300">Cancel</button>
+                <button id="confirm-reset-btn" class="px-6 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700">Reset</button>
+            </div>
+        </div>
+    </div>
+ 
+    <div class="w-full max-w-5xl mx-auto">
+        <div id="main-layout" class="flex flex-col md:flex-row gap-6">
+            <!-- Left Column: Leaderboard -->
+            <div id="leaderboard-col" class="w-full md:w-1/2 lg:w-3/5 bg-white rounded-2xl shadow-lg flex flex-col transition-all duration-500 ease-in-out">
+                <div id="leaderboard-header" class="p-6 border-b border-gray-200 relative">
+                     <div id="final-reset-container" class="absolute top-4 right-4 hidden">
+                        <button id="final-reset-btn" class="text-gray-400 hover:text-gray-600" title="Reset Leaderboard">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 1 1-9-9c2.52 0 4.88.99 6.62 2.62"></path><path d="M22 2v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                        </button>
+                    </div>
+                    <h1 class="text-2xl md:text-3xl font-bold text-gray-800 text-center">🏆 Trojan Games Champion 🏆</h1>
+                    <p class="text-center text-gray-500 mt-2">Points awarded increase with each trophy!</p>
+                </div>
+                <div class="p-4 md:p-6 flex-grow">
+                    <ol id="leaderboard-list" class="space-y-3"></ol>
+                    <div id="loading-state" class="text-center py-8 text-gray-500">
+                        <p>Loading leaderboard...</p>
+                    </div>
+                    <div id="empty-state" class="text-center py-8 text-gray-500 hidden">
+                        <p>Leaderboard is empty. Seeding initial teams...</p>
+                    </div>
+                </div>
+            </div>
+ 
+            <!-- Right Column: Form -->
+            <div id="form-col" class="w-full md:w-1/2 lg:w-2/5 transition-opacity duration-500 ease-in-out">
+                 <div class="bg-white rounded-2xl shadow-lg p-6 relative">
+                    <button id="initial-reset-btn" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600" title="Reset Leaderboard">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 1 1-9-9c2.52 0 4.88.99 6.62 2.62"></path><path d="M22 2v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    </button>
+                    <h2 id="form-title" class="text-2xl font-bold text-gray-800 mb-4 text-center">Plane Toss Trophy</h2>
+                    <form id="award-points-form" class="space-y-4">
+                        <div class="flex items-center gap-3">
+                            <label for="first-place-team" class="w-16 text-3xl text-center">🥇</label>
+                            <input type="text" id="first-place-team" list="team-names-list" placeholder="Select 1st place team" class="flex-grow w-full px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label for="second-place-team" class="w-16 text-3xl text-center">🥈</label>
+                            <input type="text" id="second-place-team" list="team-names-list" placeholder="Select 2nd place team" class="flex-grow w-full px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label for="third-place-team" class="w-16 text-3xl text-center">🥉</label>
+                            <input type="text" id="third-place-team" list="team-names-list" placeholder="Select 3rd place team" class="flex-grow w-full px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                        </div>
+                        <button id="submit-button" type="submit" class="w-full bg-indigo-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200">
+                            Award Points
+                        </button>
+                    </form>
+                    <div id="message-box" class="message-box mt-4 text-center font-medium opacity-0"></div>
+                 </div>
+                 <div id="user-info" class="text-center text-xs text-gray-400 mt-4"></div>
+                 <!-- Manage Teams Section -->
+                 <details class="bg-white rounded-2xl shadow-lg p-6 mt-6">
+                    <summary class="font-semibold text-gray-700 cursor-pointer">Manage Teams</summary>
+                    <div class="mt-4 space-y-6">
+                        <!-- Add Team -->
+                        <div>
+                            <h3 class="font-medium text-gray-600 mb-2">Add New Team</h3>
+                            <form id="add-team-form" class="flex flex-col sm:flex-row gap-3">
+                                <input type="text" id="new-team-name" placeholder="New Team Name" class="flex-grow w-full px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                                <button type="submit" class="w-full sm:w-auto bg-gray-600 text-white font-semibold px-6 py-2 rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors duration-200">
+                                    Add
+                                </button>
+                            </form>
+                            <div id="add-team-message-box" class="message-box mt-3 text-center font-medium opacity-0"></div>
+                        </div>
+                        <!-- Remove Team -->
+                        <div>
+                            <h3 class="font-medium text-gray-600 mb-2">Remove Team</h3>
+                            <form id="remove-team-form" class="flex flex-col sm:flex-row gap-3">
+                                <input type="text" id="remove-team-name" list="team-names-list" placeholder="Select team to remove" class="flex-grow w-full px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500" required>
+                                <button type="submit" class="w-full sm:w-auto bg-red-600 text-white font-semibold px-6 py-2 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200">
+                                    Remove
+                                </button>
+                            </form>
+                            <div id="remove-team-message-box" class="message-box mt-3 text-center font-medium opacity-0"></div>
+                        </div>
+                    </div>
+                 </details>
+            </div>
+        </div>
+    </div>
+ 
+    <datalist id="team-names-list"></datalist>
+ 
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, onSnapshot, getDocs, runTransaction, writeBatch, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+ 
+        let TEAMS = [ "Sparkles", "Navy Blue", "Floral", "Neon", "Light Purple", "Animal Print", "Lime Green", "Mustard Yellow", "Gray", "Orange Crush", "Sky Blue", "Tie Dye", "Hot Pink", "Pastel", "Polka Dot", "Gold", "Silver", "Denim", "Olive Green", "Light Pink", "Electric Blue", "Red", "Yellow" ];
+        const ORIGINAL_TEAMS = [...TEAMS];
+        const TROPHY_NAMES = [ "Plane Toss Trophy", "Mascot Trophy", "Flag Trophy", "Arena Games Trophy", "Team Spirit Trophy" ];
+        const TROPHY_GOAL = 5;
+ 
+        const firebaseConfig = {
+          apiKey: "AIzaSyDnlnNAf0ya_Z9i2sQaPvAbQe4at44OEG4",
+ 
+                authDomain: "trojan-games-leader-board.firebaseapp.com",
+              
+                projectId: "trojan-games-leader-board",
+              
+                storageBucket: "trojan-games-leader-board.firebasestorage.app",
+              
+                messagingSenderId: "372773224317",
+              
+                appId: "1:372773224317:web:67ec326ad9bd6f3aa5d614",
+              
+                measurementId: "G-PQEVRRQS2W"
+        }
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-leaderboard-app';
+ 
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+ 
+        let isAuthReady = false;
+ 
+        const leaderboardCollectionRef = collection(db, `artifacts/${appId}/public/data/leaderboard`);
+        const appStateDocRef = doc(db, `artifacts/${appId}/public/data/app_state/trophyCounter`);
+ 
+        // DOM Elements
+        const leaderboardCol = document.getElementById('leaderboard-col');
+        const formCol = document.getElementById('form-col');
+        const leaderboardList = document.getElementById('leaderboard-list');
+        const awardPointsForm = document.getElementById('award-points-form');
+        const teamDatalist = document.getElementById('team-names-list');
+        const loadingState = document.getElementById('loading-state');
+        const emptyState = document.getElementById('empty-state');
+        const messageBox = document.getElementById('message-box');
+        const formTitle = document.getElementById('form-title');
+        const initialResetBtn = document.getElementById('initial-reset-btn');
+        const finalResetContainer = document.getElementById('final-reset-container');
+        const finalResetBtn = document.getElementById('final-reset-btn');
+        const resetModal = document.getElementById('reset-modal');
+        const confirmResetBtn = document.getElementById('confirm-reset-btn');
+        const cancelResetBtn = document.getElementById('cancel-reset-btn');
+        const addTeamForm = document.getElementById('add-team-form');
+        const newTeamNameInput = document.getElementById('new-team-name');
+        const addTeamMessageBox = document.getElementById('add-team-message-box');
+        const removeTeamForm = document.getElementById('remove-team-form');
+        const removeTeamNameInput = document.getElementById('remove-team-name');
+        const removeTeamMessageBox = document.getElementById('remove-team-message-box');
+ 
+        function populateDatalist() {
+            teamDatalist.innerHTML = '';
+            TEAMS.forEach(team => {
+                const option = document.createElement('option');
+                option.value = team;
+                teamDatalist.appendChild(option);
+            });
+        }
+        populateDatalist();
+ 
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) { console.error("Authentication failed:", error); }
+            }
+            document.getElementById('user-info').textContent = `User ID: ${auth.currentUser?.uid || 'N/A'}`;
+            isAuthReady = true;
+            await seedInitialData();
+            setupListeners();
+        });
+ 
+        async function seedInitialData() {
+            const leaderboardSnapshot = await getDocs(leaderboardCollectionRef);
+            if (leaderboardSnapshot.empty) {
+                const batch = writeBatch(db);
+                TEAMS.forEach(teamName => {
+                    const teamId = teamName.toLowerCase().replace(/\s+/g, '-');
+                    batch.set(doc(leaderboardCollectionRef, teamId), { name: teamName, score: 0, history: [0, 0, 0, 0, 0] });
+                });
+                batch.set(appStateDocRef, { count: 0 });
+                await batch.commit();
+            } else {
+                const firestoreTeams = [];
+                leaderboardSnapshot.forEach(doc => firestoreTeams.push(doc.data().name));
+                TEAMS = [...new Set([...ORIGINAL_TEAMS, ...firestoreTeams])];
+                populateDatalist();
+            }
+        }
+        
+        function renderLeaderboard(teams) {
+            loadingState.classList.add('hidden');
+            if (teams.length === 0) {
+                emptyState.classList.remove('hidden');
+                leaderboardList.innerHTML = '';
+                return;
+            }
+            emptyState.classList.add('hidden');
+            const topTeams = teams.slice(0, 10);
+            const firstPositions = new Map();
+            leaderboardList.querySelectorAll('li').forEach(li => firstPositions.set(li.dataset.id, li.getBoundingClientRect()));
+            const existingElements = new Map(Array.from(leaderboardList.children).map(child => [child.dataset.id, child]));
+            leaderboardList.innerHTML = '';
+            topTeams.forEach((team, index) => {
+                let li = existingElements.get(team.id) || document.createElement('li');
+                if (!existingElements.has(team.id)) {
+                    li.dataset.id = team.id;
+                    li.className = 'leaderboard-item flex items-center p-3 bg-white rounded-lg shadow-sm border border-gray-200 new-item-animation';
+                }
+                const rank = index + 1;
+                const medal = ['🥇', '🥈', '🥉'][index] || '';
+                const displayScore = (team.score / 10).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+                li.innerHTML = `<div class="flex items-center w-full"><span class="text-lg font-bold text-gray-600 w-10 text-center">${rank}</span><span class="text-lg font-bold text-gray-800 flex-grow truncate px-4">${team.name} ${medal}</span><span class="font-bold text-indigo-600 text-lg">${displayScore} pts</span></div>`;
+                leaderboardList.appendChild(li);
+            });
+            leaderboardList.querySelectorAll('li').forEach(li => {
+                const first = firstPositions.get(li.dataset.id);
+                if (!first) return;
+                const last = li.getBoundingClientRect();
+                const invertY = first.top - last.top;
+                if (invertY === 0) return;
+                li.style.transform = `translateY(${invertY}px)`;
+                requestAnimationFrame(() => {
+                    li.classList.add('animating');
+                    li.style.transform = 'translateY(0)';
+                });
+                li.addEventListener('transitionend', () => {
+                    li.classList.remove('animating');
+                    li.style.transform = '';
+                }, { once: true });
+            });
+        }
+ 
+        function setupListeners() {
+            if (!isAuthReady) return;
+            onSnapshot(leaderboardCollectionRef, (snapshot) => {
+                const teams = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                teams.sort((a, b) => {
+                    if (b.score !== a.score) {
+                        return b.score - a.score;
+                    }
+                    const aHistory = a.history || [0,0,0,0,0];
+                    const bHistory = b.history || [0,0,0,0,0];
+                    for (let i = TROPHY_GOAL - 1; i >= 0; i--) {
+                        const roundDifference = (bHistory[i] || 0) - (aHistory[i] || 0);
+                        if (roundDifference !== 0) {
+                            return roundDifference;
+                        }
+                    }
+                    return 0;
+                });
+                renderLeaderboard(teams);
+            });
+ 
+            onSnapshot(appStateDocRef, (doc) => {
+                const count = doc.exists() ? doc.data().count : 0;
+                if (count >= TROPHY_GOAL) {
+                    enterFinalState();
+                } else {
+                    revertToInitialState();
+                    formTitle.textContent = TROPHY_NAMES[count % TROPHY_NAMES.length];
+                }
+            });
+            
+            awardPointsForm.addEventListener('submit', handleAwardPointsSubmit);
+            addTeamForm.addEventListener('submit', handleAddTeamSubmit);
+            removeTeamForm.addEventListener('submit', handleRemoveTeamSubmit);
+            initialResetBtn.addEventListener('click', () => resetModal.classList.remove('hidden'));
+            finalResetBtn.addEventListener('click', () => resetModal.classList.remove('hidden'));
+            cancelResetBtn.addEventListener('click', () => resetModal.classList.add('hidden'));
+            confirmResetBtn.addEventListener('click', handleReset);
+        }
+ 
+        function enterFinalState() {
+            formCol.classList.add('opacity-0', 'w-0', 'hidden');
+            leaderboardCol.classList.remove('md:w-1/2', 'lg:w-3/5');
+            leaderboardCol.classList.add('w-full');
+            finalResetContainer.classList.remove('hidden');
+        }
+ 
+        function revertToInitialState() {
+            formCol.classList.remove('hidden', 'opacity-0', 'w-0');
+            leaderboardCol.classList.add('md:w-1/2', 'lg:w-3/5');
+            leaderboardCol.classList.remove('w-full');
+            finalResetContainer.classList.add('hidden');
+        }
+        
+        function showMessage(text, isError = false, element = messageBox) {
+            element.textContent = text;
+            element.className = `message-box mt-3 text-center font-medium opacity-100 ${isError ? 'text-red-500' : 'text-green-600'}`;
+            setTimeout(() => element.classList.remove('opacity-100'), 3000);
+        }
+ 
+        function grandCelebration() {
+            const duration = 10 * 1000;
+            const animationEnd = Date.now() + duration;
+            const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
+            const interval = setInterval(() => {
+                const timeLeft = animationEnd - Date.now();
+                if (timeLeft <= 0) return clearInterval(interval);
+                const particleCount = 50 * (timeLeft / duration);
+                confetti({ ...defaults, particleCount, origin: { x: Math.random(), y: Math.random() - 0.2 } });
+            }, 250);
+ 
+            const balloonContainer = document.getElementById('balloon-container');
+            balloonContainer.innerHTML = '';
+            const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6'];
+            for (let i = 0; i < 20; i++) {
+                const balloon = document.createElement('div');
+                balloon.className = 'balloon';
+                balloon.style.left = `${Math.random() * 95}vw`;
+                balloon.style.animationDelay = `${Math.random() * 5}s`;
+                balloon.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                balloonContainer.appendChild(balloon);
+                setTimeout(() => balloon.remove(), 9000);
+            }
+        }
+ 
+        async function handleAwardPointsSubmit(e) {
+            e.preventDefault();
+            if (!isAuthReady) return;
+            const winners = [document.getElementById('first-place-team').value.trim(), document.getElementById('second-place-team').value.trim(), document.getElementById('third-place-team').value.trim()];
+            if (winners.some(w => !w) || new Set(winners).size !== winners.length || winners.some(w => !TEAMS.includes(w))) {
+                showMessage("Please select three unique, valid teams.", true, messageBox);
+                return;
+            }
+            
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const stateDoc = await transaction.get(appStateDocRef);
+                    const currentCount = stateDoc.exists() ? stateDoc.data().count : 0;
+                    if (currentCount >= TROPHY_GOAL) {
+                        throw new Error("The game has already ended.");
+                    }
+                    const newCount = currentCount + 1;
+                    
+                    const points = {
+                        [winners[0]]: 50 + newCount,
+                        [winners[1]]: 30 + newCount,
+                        [winners[2]]: 10 + newCount
+                    };
+                    
+                    const teamRefs = winners.map(name => doc(leaderboardCollectionRef, name.toLowerCase().replace(/\s+/g, '-')));
+                    const teamDocs = await Promise.all(teamRefs.map(ref => transaction.get(ref)));
+                    
+                    teamDocs.forEach((teamDoc, index) => {
+                        if (!teamDoc.exists()) throw new Error(`Team "${winners[index]}" not found.`);
+                        const teamData = teamDoc.data();
+                        const pointsForThisTeam = points[teamData.name];
+                        const newScore = teamData.score + pointsForThisTeam;
+                        const newHistory = teamData.history || [0,0,0,0,0];
+                        newHistory[currentCount] = pointsForThisTeam;
+                        transaction.update(teamRefs[index], { score: newScore, history: newHistory });
+                    });
+                    
+                    transaction.set(appStateDocRef, { count: newCount });
+ 
+                    if (newCount >= TROPHY_GOAL) {
+                         setTimeout(grandCelebration, 500);
+                    }
+                });
+                showMessage("Points awarded successfully!", false, messageBox);
+                awardPointsForm.reset();
+            } catch (error) {
+                console.error("Error awarding points: ", error);
+                showMessage(`Failed to award points: ${error.message}`, true, messageBox);
+            }
+        }
+ 
+        async function handleAddTeamSubmit(e) {
+            e.preventDefault();
+            const newTeamName = newTeamNameInput.value.trim();
+ 
+            if (!newTeamName) {
+                showMessage("Team name cannot be empty.", true, addTeamMessageBox);
+                return;
+            }
+ 
+            if (TEAMS.some(team => team.toLowerCase() === newTeamName.toLowerCase())) {
+                showMessage("This team name already exists.", true, addTeamMessageBox);
+                return;
+            }
+ 
+            try {
+                const teamId = newTeamName.toLowerCase().replace(/\s+/g, '-');
+                const newTeamRef = doc(leaderboardCollectionRef, teamId);
+                await setDoc(newTeamRef, { name: newTeamName, score: 0, history: [0, 0, 0, 0, 0] });
+                
+                TEAMS.push(newTeamName);
+                populateDatalist();
+                
+                showMessage(`Team "${newTeamName}" added!`, false, addTeamMessageBox);
+                addTeamForm.reset();
+            } catch (error) {
+                console.error("Error adding new team:", error);
+                showMessage("Failed to add team. Please try again.", true, addTeamMessageBox);
+            }
+        }
+ 
+        async function handleRemoveTeamSubmit(e) {
+            e.preventDefault();
+            const teamNameToRemove = removeTeamNameInput.value.trim();
+ 
+            if (!teamNameToRemove) {
+                showMessage("Please select a team to remove.", true, removeTeamMessageBox);
+                return;
+            }
+ 
+            if (!TEAMS.some(team => team.toLowerCase() === teamNameToRemove.toLowerCase())) {
+                showMessage("This team does not exist.", true, removeTeamMessageBox);
+                return;
+            }
+ 
+            try {
+                const teamId = teamNameToRemove.toLowerCase().replace(/\s+/g, '-');
+                const teamRef = doc(leaderboardCollectionRef, teamId);
+                await deleteDoc(teamRef);
+ 
+                TEAMS = TEAMS.filter(team => team.toLowerCase() !== teamNameToRemove.toLowerCase());
+                populateDatalist();
+ 
+                showMessage(`Team "${teamNameToRemove}" removed!`, false, removeTeamMessageBox);
+                removeTeamForm.reset();
+            } catch (error) {
+                console.error("Error removing team:", error);
+                showMessage("Failed to remove team. Please try again.", true, removeTeamMessageBox);
+            }
+        }
+        
+        async function handleReset() {
+            const batch = writeBatch(db);
+            const currentDocs = await getDocs(leaderboardCollectionRef);
+            // Delete all current teams
+            currentDocs.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            // Re-seed with original teams
+            ORIGINAL_TEAMS.forEach(teamName => {
+                const teamId = teamName.toLowerCase().replace(/\s+/g, '-');
+                const teamRef = doc(leaderboardCollectionRef, teamId);
+                batch.set(teamRef, { name: teamName, score: 0, history: [0, 0, 0, 0, 0] });
+            });
+            
+            TEAMS = [...ORIGINAL_TEAMS];
+            populateDatalist();
+ 
+            batch.set(appStateDocRef, { count: 0 });
+            await batch.commit();
+            showMessage("Leaderboard has been reset to its original state.", false, messageBox);
+            resetModal.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
